@@ -57,7 +57,8 @@ module {
     tasks: [UID] = [];
     tags : [Text] = [];
     assignedUsers : [Principal] = [];
-    status = #Todo
+    status = #Todo;
+    client = null;
   };
 
 
@@ -115,27 +116,26 @@ module {
   //////////////////////////////// Services ///////////////////////////////////
 
   public func createWorkspace({state: State; name: Text; description: Text; owner: Principal}): { #Ok: Workspace; #Err: Text } {
-    let uid = now();
+    let id = now();
+
     let newWorkspace: Workspace = {
-      admins : [Principal] = [owner];
-      projectIds : [UID] = [];
-      coverImage : ?Blob = null;
-      description : Text = description;
-      details: Text = "";
-      id : UID = uid;
-      logo : ?Blob = null;
-      members : [Principal] = [owner];
-      name : Text = name;
-      owner : Principal = owner;
+      nullEntity with
+      id;
+      owner;
+      members = [owner];
+      admins = [owner];
+      name;
+      description;
     };
-    ignore Map.put<Int, Workspace>(state.workspaces, ihash, uid, newWorkspace);
+
+    ignore Map.put<Int, Workspace>(state.workspaces, ihash, id, newWorkspace);
     let currentUserWorkspaces = switch(Map.get<Principal, [UID]>(state.userWorkspaces, phash, owner)) {
       case null [];
       case ( ?currentUserWorkspaces ) { currentUserWorkspaces }
     };
     let updatedUserWorkspaces = Array.tabulate<UID>(
       currentUserWorkspaces.size() + 1,
-      func i = if(i == 0) { uid } else { currentUserWorkspaces[ i - 1: Nat] }
+      func i = if(i == 0) { id } else { currentUserWorkspaces[ i - 1: Nat] }
     );
     ignore Map.put<Principal, [UID]>(state.userWorkspaces, phash, owner, updatedUserWorkspaces);
     #Ok(newWorkspace)
@@ -299,24 +299,21 @@ module {
     }
   };
 
-  public func createProject(s: State, wsid: Int, caller: Principal, name: Text, description: Text): {#Ok: Project; #Err}{
-    switch (getWorkspace(s, wsid, caller)) {
+  public func createProject(s: State, wsid: Int, projectOwner: Principal, name: Text, description: Text): {#Ok: Project; #Err}{
+    switch (getWorkspace(s, wsid, projectOwner)) {
       case (#Err(_)) { #Err };
       case (#Ok(ws)){
         //User can create project?
         let id = now();
+
         let newProject: Project = {
-          areas : [Area] = [];
-          client : ?UID = null;
-          coverImage : ?Blob = null;
-          description;
-          details : Text = "";
-          id;
-          logo : ?Blob = null;
-          members : [Principal] = [caller];
+          nullEntity with
           name;
-          projectOwner : Principal = caller;
-          workspace : UID = wsid;
+          description;
+          workspace = wsid;
+          id;
+          projectOwner;
+          members : [Principal] = [projectOwner];
         };
         ignore Map.put<UID, Project>(s.projects, ihash, id, newProject);
         let updateProjectIds = addIfNotInclude<Int>(ws.projectIds, id, func (a: UID, b: UID) = a == b);
@@ -339,6 +336,28 @@ module {
     }
   };
 
+  func insertArea(areas: [Area], new: Area, path: [UID]): [Area] {
+    if(path.size() == 0){
+      Array.tabulate<Area>( 
+        areas.size() + 1,  
+        func i = if( i == 0) {new} else {areas[i -1: Nat]}
+      );
+    } else {
+      let areasBuffer = Buffer.fromArray<Area>([]);
+      for (area in areas.vals()){
+        if(area.id == path[0]){
+          areasBuffer.add(
+            {area with subareas = insertArea(area.subareas, new, Array.subArray<UID>(path, 1, (path.size() - 1:Nat)))}
+          )
+        } else {
+          areasBuffer.add(area)
+        }
+
+      };
+      return Buffer.toArray(areasBuffer)
+    }
+  };
+
   public func createArea(s: State, prid: UID, path: [UID], creator: Principal, name: Text, description: Text): {#Ok: Area; #Err} {
     switch(Map.get<Int, Project>(s.projects, ihash, prid)){
       case null { #Err };
@@ -348,14 +367,9 @@ module {
         } else {
           let id = now();
           let newArea: Area = {nullEntity with name; description; id; creator};
-          let currentAreas = project.areas;
-          if(path.size() == 0){
-            let updatedAreas = Array.tabulate<Area>(
-              currentAreas.size() + 1,
-              func i = if( i == 0) {newArea} else {currentAreas[i -1: Nat]}
-            );
-            ignore Map.put<UID, Project>(s.projects, ihash, prid, { project with areas = updatedAreas})
-          };
+          let updatedAreas = insertArea(project.areas, newArea, path);
+          ignore Map.put<UID, Project>(s.projects, ihash, prid, { project with areas = updatedAreas});
+
           #Ok(newArea)
         }
       }
