@@ -6,6 +6,7 @@ import { ihash; phash } "mo:map/Map";
 import Buffer "mo:base/Buffer";
 import { print } "mo:base/Debug";
 import FileStorage "./fileStorage/FileStorage";
+import Comments "./Comments";
 
 module {
 
@@ -86,6 +87,7 @@ module {
     members : [Principal];
     workspace : UID; // vinculo bidireccional necesario?
     areas : [Area];
+    commentBox: Comments.CommentBox;
   };
 
   public type Area = EntityMetadata and {
@@ -123,6 +125,8 @@ module {
       fileStorage = FileStorage.init();
     };
   };
+
+  public type PushResult = Comments.PushResult;
 
   //////////////////////////////// Services ///////////////////////////////////
 
@@ -427,6 +431,7 @@ module {
           id;
           projectOwner;
           members : [Principal] = [projectOwner];
+          commentBox = Comments.newBox({depthLimit = 2});
         };
         ignore Map.put<UID, Project>(s.projects, ihash, id, newProject);
         let updateProjectIds = addIfNotInclude<Int>(ws.projectIds, id, func(a : UID, b : UID) = a == b);
@@ -479,5 +484,30 @@ module {
       };
     };
   };
+
+  public func pushComment(s: State, e: Entity, path: [Int], msg: Text, caller: Principal): PushResult{ 
+    switch e {
+      case (#Project(id)) {
+        switch (Map.get<UID, Project>(s.projects, ihash, id)){
+          case null { return #Err("Project not found") };
+          case ( ?project ) {
+            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner){
+              return #Err("Access denied for the caller")
+            };
+            let pushCommentResponse = Comments.pushWraped(project.commentBox, Comments.newComment(msg, caller), path);
+            switch pushCommentResponse {
+              case (#Ok(updateCommentBox)) {
+                ignore Map.put<UID, Project>(s.projects, ihash, id, {project with commentBox = updateCommentBox });
+                #Ok(updateCommentBox)
+              };
+              case (#Err(e)){ return #Err(e) }
+            }
+          }
+        }
+      };
+      case _ { #Err("not implemented yet")}
+    }
+  };
+   
 
 };

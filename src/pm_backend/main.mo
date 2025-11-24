@@ -126,7 +126,9 @@ shared ({caller}) persistent actor class() {
     Workspace.createArea(workspaces, prid, path, caller, name, description)
   };
 
-
+  public shared ({ caller }) func comment({entity: Workspace.Entity; msg: Text; path: [Int]}): async Workspace.PushResult{
+    Workspace.pushComment(workspaces, entity, path, msg, caller)
+  };
 
 
 
