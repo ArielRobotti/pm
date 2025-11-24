@@ -52,10 +52,10 @@ module {
     admins : Set.Set<Principal>;
   };
 
-  public func init() : State {
+  public func init(admin: Principal) : State {
     {
       users = Map.new<Principal, User>();
-      admins = Set.new<Principal>();
+      admins = Set.make<Principal>(phash, admin);
     };
   };
 

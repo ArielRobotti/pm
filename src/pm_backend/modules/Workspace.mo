@@ -5,6 +5,7 @@ import Map "mo:map/Map";
 import { ihash; phash } "mo:map/Map";
 import Buffer "mo:base/Buffer";
 import { print } "mo:base/Debug";
+import FileStorage "./fileStorage/FileStorage";
 
 module {
 
@@ -12,69 +13,78 @@ module {
 
   public type UID = Int; //Date of creation
 
+  public type UserResources = {
+    workspaces : [UID];
+    projects : [UID];
+  };
+
   public type State = {
-    userWorkspaces: Map.Map<Principal, [UID]>;
-    workspaces: Map.Map<Int, Workspace>;
-    projects: Map.Map<Int, Project>;
+    userResources : Map.Map<Principal, UserResources>;
+    workspaces : Map.Map<Int, Workspace>;
+    projects : Map.Map<Int, Project>;
+    fileStorage: FileStorage.FileStorage;
   };
 
   public type Entity = {
-    #Workspace: UID;
-    #Project: UID;
-    #Area: [UID]
+    #Workspace : UID;
+    #Project : UID;
+    #Area : [UID];
   };
   public type EntityEditableData = {
     name : Text;
     description : Text;
-    details: Text;
-    coverImage: ?Blob;
-    logo: ?Blob;
+    details : Text;
+    coverImage : ?Blob;
+    logo : ?Blob;
   };
 
   public type OptEntityEditableData = {
     name : ?Text;
     description : ?Text;
-    details: ?Text;
-    coverImage: ?Blob;
-    logo: ?Blob;
+    details : ?Text;
+    coverImage : ?Blob;
+    logo : ?Blob;
   };
 
   public type EntityMetadata = EntityEditableData and {
     id : UID;
   };
 
+  // public let anonimous = Principal.fromBlob("\04");
+  // let blob: Blob = "\04";
+
   let nullEntity = {
+    id = 0;
     name : Text = "";
     description : Text = "";
-    details: Text = "";
-    coverImage: ?Blob = null;
-    logo: ?Blob = null;
-    admins: [Principal] = [];
+    details : Text = "";
+    coverImage : ?Blob = null;
+    logo : ?Blob = null;
+    admins : [Principal] = [];
     members : [Principal] = [];
     projectIds : [UID] = [];
     areas : [Area] = [];
     subareas : [Area] = [];
-    tasks: [UID] = [];
+    tasks : [UID] = [];
     tags : [Text] = [];
     assignedUsers : [Principal] = [];
     status = #Todo;
     client = null;
   };
 
-
   public type Workspace = EntityMetadata and {
     owner : Principal;
-    admins: [Principal];
+    admins : [Principal];
     members : [Principal];
     projectIds : [UID];
   };
 
   public type Project = EntityMetadata and {
-    id: UID;
-    client: ?UID; 
+    id : UID;
+    client : ?UID;
     projectOwner : Principal;
     members : [Principal];
-    workspace: UID; // vinculo bidireccional necesario?
+    workspace : UID; // vinculo bidireccional necesario?
     areas : [Area];
   };
 
@@ -93,7 +103,7 @@ module {
   public type TastStatus = {
     #Todo : ChangeRecord;
     #InProgress : ChangeRecord;
-    #Review: ChangeRecord;
+    #Review : ChangeRecord;
     #Done : ChangeRecord;
     #Custom : { customStatus : Text; change : ChangeRecord };
   };
@@ -101,24 +111,24 @@ module {
   public type Task = EntityMetadata and {
     tags : [Text];
     status : TastStatus;
-    deadline: Int;
+    deadline : Int;
     assignedUsers : [Principal];
   };
 
-  public func init(): State {
+  public func init() : State {
     {
-      userWorkspaces = Map.new<Principal, [UID]>();
+      userResources = Map.new<Principal, UserResources>();
       workspaces = Map.new<Int, Workspace>();
       projects = Map.new<Int, Project>();
-    }
+      fileStorage = FileStorage.init();
+    };
   };
 
   //////////////////////////////// Services ///////////////////////////////////
 
-  public func createWorkspace({state: State; name: Text; description: Text; owner: Principal}): { #Ok: Workspace; #Err: Text } {
+  public func createWorkspace({ state : State; name : Text; description : Text; owner : Principal }) : { #Ok : Workspace; #Err : Text } {
     let id = now();
-
-    let newWorkspace: Workspace = {
+    let newWorkspace : Workspace = {
       nullEntity with
       id;
       owner;
@@ -129,184 +139,287 @@ module {
     };
 
     ignore Map.put<Int, Workspace>(state.workspaces, ihash, id, newWorkspace);
-    let currentUserWorkspaces = switch(Map.get<Principal, [UID]>(state.userWorkspaces, phash, owner)) {
-      case null [];
-      case ( ?currentUserWorkspaces ) { currentUserWorkspaces }
+    
+    let userResources: UserResources = switch(Map.get<Principal, UserResources>(state.userResources, phash, owner)){
+      case null { {workspaces = []; projects = []} };
+      case ( ?v ) { v }
     };
-    let updatedUserWorkspaces = Array.tabulate<UID>(
-      currentUserWorkspaces.size() + 1,
-      func i = if(i == 0) { id } else { currentUserWorkspaces[ i - 1: Nat] }
+
+    ignore Map.put<Principal, UserResources>(
+      state.userResources, 
+      phash, 
+      owner, 
+      {userResources with workspaces = addIfNotInclude<UID>(userResources.workspaces, id, func (a: UID, b: UID) = a == b)}
     );
-    ignore Map.put<Principal, [UID]>(state.userWorkspaces, phash, owner, updatedUserWorkspaces);
-    #Ok(newWorkspace)
+
+    #Ok(newWorkspace);
   };
 
-  func updateData(data: EntityEditableData, optData: OptEntityEditableData) : EntityEditableData {
-    let name = switch (optData.name) {case null data.name; case (?name) name};
-    let description = switch (optData.description) {case null data.description; case (?description) description};
-    let details = switch (optData.details) {case null data.details; case (?details) details};
-    let coverImage = switch (optData.coverImage) {case null data.coverImage; case (?coverImage) ?coverImage};
-    let logo = switch (optData.logo) {case null data.logo; case (?logo) ?logo};
-    {name; description; details; coverImage; logo;}
+  func updateData(data : EntityEditableData, optData : OptEntityEditableData) : EntityEditableData {
+    let name = switch (optData.name) { case null data.name; case (?v) v };
+    let description = switch (optData.description) { case null data.description; case (?v) v };
+    let details = switch (optData.details) { case null data.details; case (?v) v };
+    let coverImage = switch (optData.coverImage) { case null data.coverImage; case (v) v };
+    let logo = switch (optData.logo) { case null data.logo; case (v) v };
+    { name; description; details; coverImage; logo };
   };
-  
-  public func editEntity(s: State, caller: Principal, entity: Entity, data: OptEntityEditableData): {#Ok; #Err: Text} {
-    
-    switch entity{
+
+  public func editEntity(s : State, caller : Principal, entity : Entity, data : OptEntityEditableData) : {
+    #Ok;
+    #Err : Text;
+  } {
+
+    switch entity {
       case (#Workspace(id)) {
-        switch (Map.get<UID, Workspace>(s.workspaces, ihash, id)){
+        switch (Map.get<UID, Workspace>(s.workspaces, ihash, id)) {
           case null { #Err("Workspace not found") };
-          case ( ?workspace ) {
-            if (not inArray<Principal>(workspace.admins, caller, Principal.equal)){ 
-              return #Err("Caller is not an admin")
+          case (?workspace) {
+            if (not inArray<Principal>(workspace.admins, caller, Principal.equal)) {
+              return #Err("Caller is not an admin");
             } else {
-              let {name; description; details; coverImage; logo; } = updateData(workspace, data);
-              ignore Map.put<UID, Workspace>(s.workspaces, ihash, id, {workspace with name; description; details; coverImage; logo;});
-              return #Ok
-            }
-          }
-        }
+              let { name; description; details; coverImage; logo } = updateData(workspace, data);
+              ignore Map.put<UID, Workspace>(s.workspaces, ihash, id, { workspace with name; description; details; coverImage; logo });
+              return #Ok;
+            };
+          };
+        };
       };
       case (#Project(id)) {
-        switch (Map.get<UID, Project>(s.projects, ihash, id)){
+        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
           case null { #Err("Project not found") };
-          case ( ?project ) {
-            if (caller != project.projectOwner){ 
-              return #Err("Caller is not project owner")
+          case (?project) {
+            if (caller != project.projectOwner) {
+              return #Err("Caller is not project owner");
             } else {
-              let {name; description; details; coverImage; logo; } = updateData(project, data);
-              ignore Map.put<UID, Project>(s.projects, ihash, id, {project with name; description; details; coverImage; logo;});
-              return #Ok
-            }
-          }
-        }
+              let { name; description; details; coverImage; logo } = updateData(project, data);
+              ignore Map.put<UID, Project>(s.projects, ihash, id, { project with name; description; details; coverImage; logo });
+              return #Ok;
+            };
+          };
+        };
       };
       case (#Area(path)) {
-        if(path.size() < 2) {
-          return #Err("Incorrect path")
+        if (path.size() < 2) {
+          return #Err("Incorrect path");
         };
-        switch(Map.get<UID, Project>(s.projects, ihash, path[0])){
-          case null { return #Err("Project not found")};
-          case (?project){
+        switch (Map.get<UID, Project>(s.projects, ihash, path[0])) {
+          case null { return #Err("Project not found") };
+          case (?project) {
             let areasBuffer = Buffer.fromArray<Area>([]);
-            for (area in project.areas.vals()){
-              if (area.id == path[1]){
-                areasBuffer.add(updateArea(area, Array.subArray(path, 2, (path.size() -2: Nat)), data));
+            for (area in project.areas.vals()) {
+              if (area.id == path[1]) {
+                areasBuffer.add(updateArea(area, Array.subArray(path, 2, (path.size() -2 : Nat)), data));
                 // print(debug_show(area));
               } else {
-                areasBuffer.add(area)
-              }
+                areasBuffer.add(area);
+              };
             };
             let areas = Buffer.toArray(areasBuffer);
-            ignore Map.put<UID, Project>(s.projects, ihash, path[0], {project with areas});
-            #Ok
-          }
-        }
+            ignore Map.put<UID, Project>(s.projects, ihash, path[0], { project with areas });
+            #Ok;
+          };
+        };
       };
-      case _ { #Ok }
-    }
+      case _ { #Ok };
+    };
   };
 
-  func updateArea(root: Area, path: [UID], newData: OptEntityEditableData): Area {
-    print(debug_show(path));
-    if(path.size() == 0){ // Caso base recursividad
-      let {name; description; details; coverImage; logo} = updateData(root, newData);
-      return {root with name; description; details; coverImage; logo;}
+  func updateArea(root : Area, path : [UID], newData : OptEntityEditableData) : Area {
+    print(debug_show (path));
+    if (path.size() == 0) {
+      // Caso base recursividad
+      let { name; description; details; coverImage; logo } = updateData(root, newData);
+      return { root with name; description; details; coverImage; logo };
     };
     let areasBuffer = Buffer.fromArray<Area>([]);
 
-    for (area in root.subareas.vals()){
-      if(area.id != path[0]) { 
-        areasBuffer.add(area)
+    for (area in root.subareas.vals()) {
+      if (area.id != path[0]) {
+        areasBuffer.add(area);
       } else {
-        areasBuffer.add(updateArea(area, Array.subArray(path, 1, path.size() -1 : Nat), newData))
-      }
+        areasBuffer.add(updateArea(area, Array.subArray(path, 1, path.size() -1 : Nat), newData));
+      };
     };
-    {root with subareas = Buffer.toArray<Area>(areasBuffer)}
+    { root with subareas = Buffer.toArray<Area>(areasBuffer) };
   };
-
 
   /////////////////////////////////// Geters ////////////////////////////////////
 
-  public func getUserWorkspaces(state: State, caller: Principal): [UID]{
-    switch (Map.get<Principal, [UID]>(state.userWorkspaces, phash, caller)){
-      case null { [] };
-      case (?uids) {uids}
+  public func getUserWorkspaces(state : State, caller : Principal) : [UID] {
+    // switch (Map.get<Principal, [UID]>(state.userWorkspaces, phash, caller)) {
+    //   case null { [] };
+    //   case (?uids) { uids };
+    // };
+    switch (Map.get<Principal, UserResources>(state.userResources, phash, caller)){
+      case null [];
+      case (?resources) {resources.workspaces}
+    }
+  };
+
+  public func getUserProjects(state : State, caller : Principal) : [UID] {
+    switch (Map.get<Principal, UserResources>(state.userResources, phash, caller)){
+      case null [];
+      case (?resources) {resources.projects}
     }
   };
 
   //////////////////////////// Auxiliar functions  //////////////////////////////
 
-  func addIfNotInclude<T>(a: [T], e: T, equal: (T, T ) -> Bool): [T] {
-    if(not inArray<T>(a, e, equal)){
+  func addIfNotInclude<T>(a : [T], e : T, equal : (T, T) -> Bool) : [T] {
+    if (not inArray<T>(a, e, equal)) {
       Array.tabulate<T>(
         a.size() + 1,
-        func i = if(i == 0 ) { e } else { a[i - 1: Nat]} 
-      )
+        func i = if (i == 0) { e } else { a[i - 1 : Nat] },
+      );
     } else {
-      a
-    }
+      a;
+    };
   };
 
-  func inArray<T>(a: [T], e: T, equal: (T, T) -> Bool): Bool{
-    for (elem in a.vals()){
-      if(equal(elem, e)){ return true }
+  func inArray<T>(a : [T], e : T, equal : (T, T) -> Bool) : Bool {
+    for (elem in a.vals()) {
+      if (equal(elem, e)) { return true };
     };
-    false
+    false;
   };
+
+  func insertArea(areas : [Area], new : Area, path : [UID]) : [Area] {
+    if (path.size() == 0) {
+      Array.tabulate<Area>(
+        areas.size() + 1,
+        func i = if (i == 0) { new } else { areas[i - 1 : Nat] },
+      );
+    } else {
+      let areasBuffer = Buffer.fromArray<Area>([]);
+      for (area in areas.vals()) {
+        if (area.id == path[0]) {
+          areasBuffer.add({
+            area with subareas = insertArea(area.subareas, new, Array.subArray<UID>(path, 1, (path.size() - 1 : Nat)))
+          });
+        } else {
+          areasBuffer.add(area);
+        };
+      };
+      return Buffer.toArray(areasBuffer);
+    };
+  };
+
+  func isWorkspaceAdmin(s : State, wsid : UID, u : Principal) : Bool {
+    switch (Map.get<UID, Workspace>(s.workspaces, ihash, wsid)) {
+      case null { false };
+      case (?ws) { inArray<Principal>(ws.admins, u, Principal.equal) };
+    };
+  };
+
+  func iequal(a: Int, b: Int): Bool { a == b};
   //////////////////////////////////////////////////////////////////////////////
 
-  public func getWorkspace(state: State, id: UID, caller: Principal): {#Ok: Workspace; #Err: Text}{
-    switch (Map.get<Int, Workspace>(state.workspaces, ihash, id)){
+  public func getWorkspace(state : State, id : UID, caller : Principal) : {
+    #Ok : Workspace;
+    #Err : Text;
+  } {
+    switch (Map.get<Int, Workspace>(state.workspaces, ihash, id)) {
       case null { #Err("WorkspaceNotFound") };
       case (?workspace) {
-        if (not inArray<Principal>(workspace.members, caller, Principal.equal)){
-          #Err("AccessDenied")
+        if (not inArray<Principal>(workspace.members, caller, Principal.equal)) {
+          #Err("AccessDenied");
         } else {
-          #Ok(workspace)
+          #Ok(workspace);
+        };
+      };
+    };
+  };
+
+  public func addMember(s: State, e: Entity, caller: Principal, newMember: Principal): {#Ok: [Principal]; #Err: Text}{
+    switch e {
+      case ( #Workspace(id) ) {
+        switch(Map.get<Int, Workspace>(s.workspaces, ihash, id)) {
+          case null { return #Err("WorkspaceNotFound")};
+          case ( ?ws ) {
+            if (not inArray<Principal>(ws.admins, caller, Principal.equal)) {
+              #Err("ActionDenied");
+            } else {
+              let members = addIfNotInclude<Principal>(ws.members, newMember, Principal.equal);
+              ignore Map.put<Int, Workspace>(
+                s.workspaces,
+                ihash,
+                id,
+                { ws with members },
+              );
+              let userResources: UserResources = switch(Map.get<Principal, UserResources>(s.userResources, phash, newMember)){
+                case null { {workspaces = []; projects = []} };
+                case ( ?r ) { r }
+              };
+              ignore Map.put<Principal, UserResources>(
+                s.userResources, 
+                phash,
+                newMember,
+                {userResources with workspaces = addIfNotInclude(userResources.workspaces, id, iequal)} 
+              );
+
+              #Ok(members);
+            }
+          } 
         }
-      }
+      };
+      case ( #Project(id) ) {
+        switch (Map.get<UID, Project>(s.projects, ihash,id )) {
+          case null { return #Err("ProjectNotFound")};
+          case ( ?pr ) {
+            if(pr.projectOwner != caller) {
+              return #Err("ActionDenied")
+            } else {
+
+              let parentWs: Workspace = switch(Map.get<UID, Workspace>(s.workspaces, ihash, pr.workspace)){
+                case null {return #Err("Error 001"); {nullEntity with owner = Principal.fromBlob("\04")} };
+                case (?ws) { ws }
+              };
+
+              let projectMembers = addIfNotInclude<Principal>(pr.members, newMember, Principal.equal);
+              let workspaceMembers = addIfNotInclude<Principal>(parentWs.members, newMember, Principal.equal);
+              ignore Map.put<UID, Workspace>(s.workspaces, ihash, pr.workspace, {parentWs with members = workspaceMembers });
+              ignore Map.put<UID, Project>(s.projects, ihash, pr.workspace, {pr with members = projectMembers });
+
+              let userResources: UserResources = switch(Map.get<Principal, UserResources>(s.userResources, phash, newMember)){
+                case null { {workspaces = []; projects = []}};
+                case ( ?r ) { r }; 
+              };
+              ignore Map.put<Principal, UserResources>(
+                s.userResources, 
+                phash, 
+                newMember,
+                {
+                  workspaces = addIfNotInclude<Int>(userResources.workspaces, pr.workspace, iequal);
+                  projects = addIfNotInclude<Int>(userResources.projects, pr.id, iequal);
+                }
+              );
+              #Ok(projectMembers)
+            }
+          }
+        }
+
+      };
+      case ( #Area(path) ){
+        //TODO
+        #Ok([]);
+      };
+      case _ { 
+        #Ok([]);
+      };
     }
   };
 
-  public func addMember(state: State, id: UID, caller: Principal, newMember: Principal): {#Ok: [Principal]; #Err: Text } {
-    switch (Map.get<Int, Workspace>(state.workspaces, ihash, id)){
-      case null { #Err("WorkspaceNotFound") };
-      case (?workspace) {
-        if (not inArray<Principal>(workspace.admins, caller, Principal.equal)){
-          #Err("ActionDenied")
-        } else {
-          let members = addIfNotInclude<Principal>(workspace.members, newMember, Principal.equal);
-          ignore Map.put<Int, Workspace>(
-            state.workspaces, 
-            ihash, 
-            id, 
-            {workspace with members}
-          );
-          ignore Map.put<Principal, [UID]>(
-            state.userWorkspaces, 
-            phash,
-            newMember,
-            addIfNotInclude<Int>(
-              getUserWorkspaces(state, newMember),
-              id,
-              func (a: Int, b: Int) = a == b
-            )
-          );
-          #Ok(members)
-        }
-      }
-    }
-  };
-
-  public func createProject(s: State, wsid: Int, projectOwner: Principal, name: Text, description: Text): {#Ok: Project; #Err}{
+  public func createProject(s : State, wsid : Int, projectOwner : Principal, name : Text, description : Text) : {
+    #Ok : Project;
+    #Err;
+  } {
     switch (getWorkspace(s, wsid, projectOwner)) {
       case (#Err(_)) { #Err };
-      case (#Ok(ws)){
+      case (#Ok(ws)) {
         //User can create project?
         let id = now();
 
-        let newProject: Project = {
+        let newProject : Project = {
           nullEntity with
           name;
           description;
@@ -316,64 +429,55 @@ module {
           members : [Principal] = [projectOwner];
         };
         ignore Map.put<UID, Project>(s.projects, ihash, id, newProject);
-        let updateProjectIds = addIfNotInclude<Int>(ws.projectIds, id, func (a: UID, b: UID) = a == b);
-        ignore Map.put<UID, Workspace>(s.workspaces, ihash, wsid, { ws with projectIds = updateProjectIds});
-        #Ok(newProject)
-      }
-    }
+        let updateProjectIds = addIfNotInclude<Int>(ws.projectIds, id, func(a : UID, b : UID) = a == b);
+        ignore Map.put<UID, Workspace>(s.workspaces, ihash, wsid, { ws with projectIds = updateProjectIds });
+        #Ok(newProject);
+      };
+    };
   };
 
-  public func getProject(state: State, id: UID, caller: Principal): {#Ok: Project; #Err: Text}{
-    switch (Map.get<Int, Project>(state.projects, ihash, id)){
+  public func getProject(state : State, id : UID, caller : Principal) : {
+    #Ok : Project;
+    #Err : Text;
+  } {
+    switch (Map.get<Int, Project>(state.projects, ihash, id)) {
       case null { #Err("ProjectNotFound") };
       case (?project) {
-        if (not inArray<Principal>(project.members, caller, Principal.equal)){
-          #Err("AccessDenied")
+        if (not inArray<Principal>(project.members, caller, Principal.equal) and not isWorkspaceAdmin(state, project.workspace, caller)) {
+          #Err("AccessDenied");
         } else {
-          #Ok(project)
-        }
-      }
-    }
-  };
-
-  func insertArea(areas: [Area], new: Area, path: [UID]): [Area] {
-    if(path.size() == 0){
-      Array.tabulate<Area>( 
-        areas.size() + 1,  
-        func i = if( i == 0) {new} else {areas[i -1: Nat]}
-      );
-    } else {
-      let areasBuffer = Buffer.fromArray<Area>([]);
-      for (area in areas.vals()){
-        if(area.id == path[0]){
-          areasBuffer.add(
-            {area with subareas = insertArea(area.subareas, new, Array.subArray<UID>(path, 1, (path.size() - 1:Nat)))}
-          )
-        } else {
-          areasBuffer.add(area)
-        }
-
+          #Ok(project);
+        };
       };
-      return Buffer.toArray(areasBuffer)
-    }
+    };
   };
 
-  public func createArea(s: State, prid: UID, path: [UID], creator: Principal, name: Text, description: Text): {#Ok: Area; #Err} {
-    switch(Map.get<Int, Project>(s.projects, ihash, prid)){
+  // func addMember
+
+  public func createArea(s : State, prid : UID, path : [UID], creator : Principal, name : Text, description : Text) : {
+    #Ok : Area;
+    #Err;
+  } {
+    switch (Map.get<Int, Project>(s.projects, ihash, prid)) {
       case null { #Err };
       case (?project) {
-        if (not inArray<Principal>(project.members, creator, Principal.equal)){
-          #Err
+        if (not inArray<Principal>(project.members, creator, Principal.equal)) {
+          #Err;
         } else {
           let id = now();
-          let newArea: Area = {nullEntity with name; description; id; creator};
+          let newArea : Area = {
+            nullEntity with name;
+            description;
+            id;
+            creator;
+          };
           let updatedAreas = insertArea(project.areas, newArea, path);
-          ignore Map.put<UID, Project>(s.projects, ihash, prid, { project with areas = updatedAreas});
+          ignore Map.put<UID, Project>(s.projects, ihash, prid, { project with areas = updatedAreas });
 
-          #Ok(newArea)
-        }
-      }
-    }
+          #Ok(newArea);
+        };
+      };
+    };
   };
 
 };
