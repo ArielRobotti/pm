@@ -127,6 +127,9 @@ module {
   };
 
   public type PushResult = Comments.PushResult;
+  public type DeleteResult = Comments.DeleteResult;
+  public type ReactResult = Comments.ReactResult;
+  public type EditResult = Comments.EditResult;
 
   //////////////////////////////// Services ///////////////////////////////////
 
@@ -431,7 +434,7 @@ module {
           id;
           projectOwner;
           members : [Principal] = [projectOwner];
-          commentBox = Comments.newBox({depthLimit = 2});
+          commentBox = Comments.newBox({depthLimit = 3});
         };
         ignore Map.put<UID, Project>(s.projects, ihash, id, newProject);
         let updateProjectIds = addIfNotInclude<Int>(ws.projectIds, id, func(a : UID, b : UID) = a == b);
@@ -494,7 +497,7 @@ module {
             if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner){
               return #Err("Access denied for the caller")
             };
-            let pushCommentResponse = Comments.pushWraped(project.commentBox, Comments.newComment(msg, caller), path);
+            let pushCommentResponse = Comments.push(project.commentBox, Comments.newComment(msg, caller), path);
             switch pushCommentResponse {
               case (#Ok(updateCommentBox)) {
                 ignore Map.put<UID, Project>(s.projects, ihash, id, {project with commentBox = updateCommentBox });
@@ -508,6 +511,79 @@ module {
       case _ { #Err("not implemented yet")}
     }
   };
+
+  public func deleteComment(s: State, e: Entity, path: [Int], caller: Principal): DeleteResult {
+    switch e {
+      case (#Project(id)) {
+        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
+          case null { return #Err("Project not found") };
+          case (?project) {
+            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner) {
+              return #Err("Access denied for the caller")
+            };
+            let deleteCommentResponse = Comments.delete(project.commentBox, path, caller);
+            switch (deleteCommentResponse) {
+              case (#Ok(updateCommentBox)) {
+                ignore Map.put<UID, Project>(s.projects, ihash, id, { project with commentBox = updateCommentBox });
+                #Ok(updateCommentBox)
+              };
+              case (#Err(e)) { return #Err(e) }
+            };
+          };
+        };
+      };
+      case _ { #Err("not implemented yet") }
+    }
+  };
+
+  public func editComment(s: State, e: Entity, path: [Int], newMsg: Text, caller: Principal): EditResult {
+    switch e {
+      case (#Project(id)) {
+        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
+          case null { return #Err("Project not found") };
+          case (?project) {
+            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner) {
+              return #Err("Access denied for the caller")
+            };
+            let editCommentResponse = Comments.edit(project.commentBox, path, newMsg, caller);
+            switch (editCommentResponse) {
+              case (#Ok(updateCommentBox)) {
+                ignore Map.put<UID, Project>(s.projects, ihash, id, { project with commentBox = updateCommentBox });
+                #Ok(updateCommentBox)
+              };
+              case (#Err(e)) { return #Err(e) }
+            };
+          };
+        };
+      };
+      case _ { #Err("not implemented yet") }
+    }
+  };
+
+  public func reactToComment(s: State, e: Entity, path: [Int], reaction: ?Bool, caller: Principal): ReactResult {
+    switch e {
+      case (#Project(id)) {
+        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
+          case null { return #Err("Project not found") };
+          case (?project) {
+            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner) {
+              return #Err("Access denied for the caller")
+            };
+            let reactCommentResponse = Comments.react(project.commentBox, path, reaction, caller);
+            switch (reactCommentResponse) {
+              case (#Ok(updateCommentBox)) {
+                ignore Map.put<UID, Project>(s.projects, ihash, id, { project with commentBox = updateCommentBox });
+                #Ok(updateCommentBox)
+              };
+              case (#Err(e)) { return #Err(e) }
+            };
+          };
+        };
+      };
+      case _ { #Err("not implemented yet") }
+    }
+  };
+
    
 
 };

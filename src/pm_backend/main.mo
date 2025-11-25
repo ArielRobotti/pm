@@ -130,6 +130,18 @@ shared ({caller}) persistent actor class() {
     Workspace.pushComment(workspaces, entity, path, msg, caller)
   };
 
+  public shared ({ caller }) func deleteComment({entity: Workspace.Entity; path: [Int]}): async Workspace.DeleteResult {
+    Workspace.deleteComment(workspaces, entity, path, caller)
+  };
+
+  public shared ({ caller }) func editComment({entity: Workspace.Entity; path: [Int]; newMsg: Text}): async Workspace.EditResult {
+    Workspace.editComment(workspaces, entity, path, newMsg, caller)
+  };
+
+  public shared ({ caller }) func reactToComment({entity: Workspace.Entity; path: [Int]; reaction: ?Bool}): async Workspace.ReactResult {
+    Workspace.reactToComment(workspaces, entity, path, reaction, caller)
+  };
+
 
 
 };

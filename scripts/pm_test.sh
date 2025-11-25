@@ -62,5 +62,13 @@ dfx canister call pm editWorkspace "(
   $WORKSPACE_ID: int,
 )"
 
+dfx canister call pm createProject "(
+  record {
+    name = \"Proyecto Uno\";
+    wsid = $WORKSPACE_ID: int;
+    description = \"Descripcion, proyecto uno\";
+  },
+)"
+ 
 
 
