@@ -5,20 +5,21 @@ import Principal "mo:base/Principal";
 import Map "mo:map/Map";
 import Set "mo:map/Set";
 import { now } "mo:base/Time";
+import { print } "mo:base/Debug";
 
-shared ({caller}) persistent actor class() {
+shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
 
   type UID = Workspace.UID;
 
-  let users = User.init(caller);
+  let users = User.init(SUPER_ADMIN);
   let workspaces = Workspace.init();
-  // let fileStorage = FileStorage.init();
 
   //// Admin functions test ///
 
   public shared ({ caller }) func testUploadFileRequest(size: Nat): async FileStorage.GetStorageResponse {
     assert(User.isUser(users, caller));
-    await FileStorage.getStorageFor(workspaces.fileStorage, size, caller, callback)
+    let adminsBucket = [SUPER_ADMIN, Principal.fromActor(this)];
+    await FileStorage.getStorageFor(workspaces.fileStorage, adminsBucket, size, caller, callback)
   };
 
   public shared ({ caller }) func getFilestorageInfo(): async [(Int, FileStorage.StorageLocation)] {
@@ -30,8 +31,13 @@ shared ({caller}) persistent actor class() {
     Map.toArray<Principal, FileStorage.BucketMetadata>(workspaces.fileStorage.buckets)
   };
 
+  public shared ({ caller }) func getBucketCanisterStatus(canisterId: Principal): async FileStorage.CanisterStatusResult {
+
+    await FileStorage.canisterStatus(canisterId)
+  };
 
   public shared ({caller})func callback({internalId: Int}): async Int {
+    print(debug_show(caller) # "llamando a PM");
     assert(FileStorage.isBucketCanister(workspaces.fileStorage, caller));
     let id = now();
     FileStorage.indexFile(workspaces.fileStorage, id, {canisterId = caller; internalId});
@@ -49,7 +55,7 @@ shared ({caller}) persistent actor class() {
     User.signUp(users, caller, name);
   };
 
-  public shared ({ caller }) func login() : async User.LoginResponse {
+  public shared query ({ caller }) func login() : async User.LoginResponse {
     assert (not Principal.isAnonymous(caller));
     User.login(users, caller);
   };
@@ -71,13 +77,6 @@ shared ({caller}) persistent actor class() {
     Workspace.editEntity(workspaces, caller, #Workspace(id), data)
   };
 
-  public shared ({ caller }) func editProject(data: Workspace.OptEntityEditableData, id: UID): async { #Ok; #Err: Text }{
-    if(not User.isUser(users, caller)){
-      return #Err("Caller is not an user")
-    };
-    Workspace.editEntity(workspaces, caller, #Project(id), data)
-  };
-
   public shared ({ caller }) func editArea(data: Workspace.OptEntityEditableData, path: [UID]): async { #Ok; #Err: Text }{
     if(not User.isUser(users, caller)){
       return #Err("Caller is not an user")
@@ -85,11 +84,11 @@ shared ({caller}) persistent actor class() {
     Workspace.editEntity(workspaces, caller, #Area(path), data)
   };
 
-  public shared ({ caller }) func getMyWorkspaces(): async [UID]{
+  public shared query ({ caller }) func getMyWorkspaces(): async [UID]{
     Workspace.getUserWorkspaces(workspaces, caller)
   };
 
-  public shared ({ caller }) func getWorkspace(id: UID): async {#Ok: Workspace.Workspace; #Err: Text}{
+  public shared query ({ caller }) func getWorkspace(id: UID): async {#Ok: Workspace.Workspace; #Err: Text}{
     Workspace.getWorkspace(workspaces, id, caller)
   };
 
@@ -100,7 +99,7 @@ shared ({caller}) persistent actor class() {
     Workspace.addMember(workspaces, #Workspace(wsid), caller, newMember)
   };
 
-  /// Projects ///
+  /// CRUD Projects ///
 
   public shared ({ caller }) func createProject({wsid: UID; name: Text; description: Text}): async {#Ok: Workspace.Project; #Err} {
     if(not User.isUser(users, caller)){
@@ -108,9 +107,16 @@ shared ({caller}) persistent actor class() {
     };
     Workspace.createProject(workspaces, wsid, caller, name, description)
   };
-
-  public shared ({ caller }) func getProject(id: UID): async {#Ok: Workspace.Project; #Err: Text}{
+  
+  public shared query ({ caller }) func getProject(id: UID): async {#Ok: Workspace.Project; #Err: Text}{
     Workspace.getProject(workspaces, id, caller)
+  };
+
+  public shared ({ caller }) func editProject(data: Workspace.OptEntityEditableData, id: UID): async { #Ok; #Err: Text }{
+    if(not User.isUser(users, caller)){
+      return #Err("Caller is not an user")
+    };
+    Workspace.editEntity(workspaces, caller, #Project(id), data)
   };
 
   public shared ({ caller }) func addMemberToProject({prid: UID;  newMember: Principal}): async {#Ok: [Principal]; #Err: Text }{
@@ -120,11 +126,18 @@ shared ({caller}) persistent actor class() {
     Workspace.addMember(workspaces, #Project(prid), caller, newMember)
   };
 
-  /// Areas ///
+  public shared ({ caller }) func archiveProject(): async (){
+    
+  };
+
+
+  ///// Areas /////
 
   public shared ({ caller }) func createArea({prid: UID; path: [UID]; name: Text; description: Text}): async {#Ok: Workspace.Area; #Err} {
     Workspace.createArea(workspaces, prid, path, caller, name, description)
   };
+
+  //// CRUD Comments and reactions /////
 
   public shared ({ caller }) func comment({entity: Workspace.Entity; msg: Text; path: [Int]}): async Workspace.PushResult{
     Workspace.pushComment(workspaces, entity, path, msg, caller)
@@ -142,6 +155,7 @@ shared ({caller}) persistent actor class() {
     Workspace.reactToComment(workspaces, entity, path, reaction, caller)
   };
 
+  //////////////////////////////////////
 
 
 };

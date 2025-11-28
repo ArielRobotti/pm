@@ -14,14 +14,6 @@ export TestUser1=$(dfx identity get-principal --identity 0000TestUser1)
 dfx identity list | grep -q "^0000TestUser2$" || dfx identity new 0000TestUser2
 export TestUser2=$(dfx identity get-principal --identity 0000TestUser2)
 
-dfx identity list | grep -q "^0000TestUser3$" || dfx identity new 0000TestUser3
-export TestUser3=$(dfx identity get-principal --identity 0000TestUser3)
-
-dfx identity list | grep -q "^0000TestUser4$" || dfx identity new 0000TestUser4
-export TestUser4=$(dfx identity get-principal --identity 0000TestUser4)
-
-dfx identity list | grep -q "^0000TestUser5$" || dfx identity new 0000TestUser5
-export TestUser5=$(dfx identity get-principal --identity 0000TestUser5)
 
 echo "Creando usuarios...\n"
 
@@ -30,15 +22,6 @@ dfx canister call pm signUp '("Usuario Uno")'
 
 dfx identity use 0000TestUser2
 dfx canister call pm signUp '("Usuario Dos")'
-
-dfx identity use 0000TestUser3
-dfx canister call pm signUp '("Usuario Tres")'
-
-dfx identity use 0000TestUser4
-dfx canister call pm signUp '("Usuario Cuatro")'
-
-dfx identity use 0000TestUser5
-dfx canister call pm signUp '("Usuario Cinco")'
 
 echo "Usuario Uno crea Workspace...\n"
 

@@ -349,11 +349,6 @@ module {
     };
   };
 
-  public func pushLike(list : List.List<Comment>, like : Like, path : [Int]) : List.List<Comment> {
-    // TODO
-    null;
-  };
-
   public func getComment(list : List.List<Comment>, path : [Int]) : ?Comment {
     if (path.size() == 0) { return null };
 

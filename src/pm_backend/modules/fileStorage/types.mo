@@ -1,4 +1,33 @@
 module {
+
+  // ===============================================
+  // 0. Canister status (System)
+  // ===============================================
+
+  public type Status = {
+    rts: {
+      rts_callback_table_count :Nat;
+      rts_callback_table_size :Nat;
+      rts_collector_instructions :  Nat;
+      rts_heap_size : Nat;
+      rts_logical_stable_memory_size : Nat;
+      rts_max_live_size : Nat;
+      rts_max_stack_size :  Nat;
+      rts_memory_size :  Nat;
+      rts_mutator_instructions : Nat;
+      rts_reclaimed : Nat;
+      rts_stable_memory_size :  Nat;
+      rts_total_allocation : Nat;
+      rts_upgrade_instructions :  Nat;
+      rts_version : Text;
+    };
+    canister: {
+      balance: Nat;
+      // stableMemorySize : Nat64;
+
+    }
+  };
+
   // ===============================================
   // 1. Tipos de Utilidad / Base (Base Types)
   // ===============================================
@@ -42,9 +71,20 @@ module {
 
   public type BucketSettingsDefinite = {
     maxSize: Nat;
-    externalAdmins: [Principal];
+    adminsBucket: [Principal];
     chunkSize: Nat;
+    uploadDone: ?(shared {internalId: Int} -> async Int)
+  };
 
+  public type BucketStatus = {
+    maxSize: Nat;
+    adminsBucket: [Principal];
+    chunkSize: Nat;
+    currentSize: Nat;
+    cycles: Nat;
+    admins: [Principal];
+    controllers: [Principal];
+    ready: Bool;
   };
 
   // ===============================================

@@ -2,9 +2,26 @@
   "canisters": {
     "pm": {
       "main": "src/pm_backend/main.mo",
-      "type": "motoko"
-    }
+      "type": "motoko",
+      "declarations": {
+        "output": "./src/pm_frontend/declarations/pm"
+      }
+    },
+    "bucket": {
+      "main": "src/pm_backend/modules/fileStorage/Bucket.mo",
+      "type": "motoko",
+      "declarations": {
+        "output": "./src/pm_frontend/declarations/bucket"
+      }
+    },
+    "frontend": {
+      "source": [
+        "src/frontend/dist"
+      ],
+      "type": "assets"
+    } 
   },
+  
   "defaults": {
     "build": {
       "args": "",
@@ -12,5 +29,6 @@
     }
   },
   "output_env_file": ".env",
-  "version": 1
+  "version": 1,
+  "dfx": "0.28.0"
 }

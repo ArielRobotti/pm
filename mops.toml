@@ -1,3 +1,4 @@
 [dependencies]
 map = "9.0.1"
 base = "0.16.0"
+ic = "3.2.0"

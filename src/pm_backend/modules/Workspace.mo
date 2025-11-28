@@ -385,7 +385,7 @@ module {
               let projectMembers = addIfNotInclude<Principal>(pr.members, newMember, Principal.equal);
               let workspaceMembers = addIfNotInclude<Principal>(parentWs.members, newMember, Principal.equal);
               ignore Map.put<UID, Workspace>(s.workspaces, ihash, pr.workspace, {parentWs with members = workspaceMembers });
-              ignore Map.put<UID, Project>(s.projects, ihash, pr.workspace, {pr with members = projectMembers });
+              ignore Map.put<UID, Project>(s.projects, ihash, id, {pr with members = projectMembers });
 
               let userResources: UserResources = switch(Map.get<Principal, UserResources>(s.userResources, phash, newMember)){
                 case null { {workspaces = []; projects = []}};
@@ -525,11 +525,20 @@ module {
             switch (deleteCommentResponse) {
               case (#Ok(updateCommentBox)) {
                 ignore Map.put<UID, Project>(s.projects, ihash, id, { project with commentBox = updateCommentBox });
-                #Ok(updateCommentBox)
+                return #Ok(updateCommentBox)
               };
               case (#Err(e)) { return #Err(e) }
             };
           };
+        };
+      };
+      case (#Area(path)) {
+        assert(path.size() >= 2);
+        switch(Map.get<UID, Project>(s.projects, ihash, path[0])) {
+          case null { return #Err("Project not found")};
+          case ( ?project ) {
+            return #Err("project Ok. Function not implemented yet")
+          }
         };
       };
       case _ { #Err("not implemented yet") }

@@ -1,6 +1,7 @@
 import Map "mo:map/Map";
 import { phash; ihash } "mo:map/Map";
 import Prim "mo:⛔";
+import IC "mo:ic";
 import Principal "mo:base/Principal";
 // import { now } "mo:base/Time";
 import Types "types";
@@ -59,12 +60,47 @@ module {
   // 5. Funciones Privadas
   // ===============================================
 
+  func addControllers(canister_id: Principal, _controllers: [Principal]): async () {
+    let ic = IC.ic;
+    let currentSettings = (await ic.canister_status({ canister_id } )).settings;
 
-  func newBucket(callback: Types.CallbackUploadDone) : async BucketMetadata {
-    Prim.cyclesAdd<system>(2_000_000_000_000); // TODO cambiar a Nueva sintaxis
-    let newBucket = await Bucket.Bucket(callback);
+    let controllers = Prim.Array_tabulate<Principal>(
+      _controllers.size() + currentSettings.controllers.size(),
+      func x = if (x < _controllers.size()) {_controllers[x]} else { currentSettings.controllers [ x - _controllers.size()]}
+    );
+    
+    let update_settings_args = {
+      canister_id;
+		  settings: IC.CanisterSettings  = {
+        controllers = ?controllers;
+        compute_allocation = ?currentSettings.compute_allocation;
+        freezing_threshold = ?currentSettings.compute_allocation;
+        log_visibility = ?currentSettings.log_visibility;
+        memory_allocation = ?currentSettings.memory_allocation;
+        reserved_cycles_limit = ?currentSettings.reserved_cycles_limit;
+        wasm_memory_limit = ?currentSettings.wasm_memory_limit;
+        wasm_memory_threshold  = ?currentSettings.wasm_memory_threshold;
+      };
+		  sender_canister_version: ?Nat64 = null;
+    };
+    ignore ic.update_settings(update_settings_args);
+  };
+
+  public type CanisterStatusResult = IC.CanisterStatusResult;
+  public func canisterStatus(canister_id: Principal): async CanisterStatusResult{
+    await IC.ic.canister_status({canister_id})
+  };
+
+  func newBucket(uploadDone: Types.CallbackUploadDone, adminsBucket: [Principal]) : async BucketMetadata {
+    // Prim.cyclesAdd<system>(2_000_000_000_000); // TODO cambiar a Nueva sintaxis
+
+    let newBucket = await (with cycles = 2_000_000_000_000) Bucket.Bucket();
+    let initResponse = await newBucket.init(uploadDone, adminsBucket);
+    print("New bucket initialized --> " # debug_show (initResponse));
     let canisterId = Principal.fromActor(newBucket);
-    { canisterId; remoteActor = newBucket };
+    print("Adding controllers to the new canister ... ");
+    ignore addControllers(canisterId, adminsBucket);
+    { canisterId ; remoteActor = newBucket };
   };
 
   // ===============================================
@@ -78,7 +114,7 @@ module {
    }
   };
 
-  public func getStorageFor(s : FileStorage, size : Nat, caller : Principal, callback: Types.CallbackUploadDone) : async GetStorageResponse {
+  public func getStorageFor(s : FileStorage, adminsBucket: [Principal], size : Nat, caller : Principal, callback: Types.CallbackUploadDone) : async GetStorageResponse {
     print("solicitando almacenamiento");
     var bestCandidate : ?{ bucket : BucketMetadata; size : Nat } = null;
     for (metadata in Map.vals(s.buckets)) {
@@ -101,7 +137,7 @@ module {
     };
 
     let storage = switch bestCandidate {
-      case null { await newBucket(callback) };
+      case null { await newBucket(callback, adminsBucket) };
       case (?best) { best.bucket };
     };
     ignore Map.put<Principal, BucketMetadata>(s.buckets, phash, storage.canisterId, storage);
