@@ -1,13 +1,20 @@
 import Map "mo:map/Map";
-import { ihash } "mo:map/Map";
+import Set "mo:map/Set";
+import { ihash; phash } "mo:map/Map";
 import Prim "mo:⛔";
 import Principal "mo:base/Principal";
 import { now } "mo:base/Time";
 import Types "types";
 import { print } "mo:base/Debug";
-import IC "mo:ic";
+// import IC "mo:ic";
 
 shared ({ caller = BUCKET_MANAGER }) persistent actor class Bucket() = this {
+
+  //// Canister references 
+
+  let pm_canister = actor(Principal.toText(BUCKET_MANAGER)): actor {
+    onFileLoaded: shared ({internalId: Int; tempIdSource: ?Int})  -> async Int
+  };
 
   //// state variables
   var bucketIsReady = false; 
@@ -19,14 +26,14 @@ shared ({ caller = BUCKET_MANAGER }) persistent actor class Bucket() = this {
 
   //// Config variables
 
-  public shared ({ caller }) func init(_uploadDone: Types.CallbackUploadDone, adminsBucket: [Principal]): async { #Ok } {
+  public shared ({ caller }) func init( adminsBucket: [Principal]): async { #Ok } {
     assert(caller == BUCKET_MANAGER);
-    config := { config with  adminsBucket; uploadDone = ?_uploadDone};
+    config := { config with  adminsBucket};
     bucketIsReady := true;
     #Ok
   };
   
-  public func status(): async Types.Status { 
+  public query func status(): async Types.Status { 
     {
       rts = {rts_callback_table_count = Prim.rts_callback_table_count();
       rts_callback_table_size  = Prim.rts_callback_table_size();
@@ -53,7 +60,6 @@ shared ({ caller = BUCKET_MANAGER }) persistent actor class Bucket() = this {
     maxSize = 200 * 1024 * 1024 * 1024;
     chunkSize = 1_048_576; // Tamaño en Bytes de los "Chuncks" 1_048_576 //1MB
     adminsBucket: [Principal] = [];
-    uploadDone: ?(shared {internalId: Int} -> async Int) = null;  
   };
 
   ///// Getters
@@ -77,7 +83,7 @@ shared ({ caller = BUCKET_MANAGER }) persistent actor class Bucket() = this {
     #Ok
   };
 
-  public func settings(): async Types.BucketSettingsDefinite {
+  public query func settings(): async Types.BucketSettingsDefinite {
     config
   };
 
@@ -89,20 +95,34 @@ shared ({ caller = BUCKET_MANAGER }) persistent actor class Bucket() = this {
     false
   };
 
+  func flattenAndDeduplicate<T>(m: [[T]], hashEqFn: (T -> Nat32, (T, T) -> Bool)): [T]{
+    let set = Set.new<T>();
+    for (array in m.vals()){
+      for (e in array.vals()) {
+        ignore Set.put<T>(set, hashEqFn, e);
+      }
+    };
+    Set.toArray(set);
+  };
+
   ///
 
-  public shared ({ caller }) func uploadRequest(owner : Principal, size : Nat) : async Types.UploadResponse {
+  public shared ({ caller }) func uploadRequest(owner : Principal, readers: [Principal], size : Nat, tempIdSource: ?Int) : async Types.UploadResponse {
     assert (authorizedCaller(caller));
     assert (size <= (config.maxSize - memorySize : Nat));
     let chunksQty = size / config.chunkSize + (if (size % config.chunkSize > 0) { 1 } else { 0 });
     let chunks : [var Blob] = Prim.Array_init<Blob>(chunksQty, "");
     let id = now();
+    let authorizedReaders: [Principal] = flattenAndDeduplicate<Principal>([[owner, caller], readers], phash);
+    print(debug_show(authorizedReaders));
     let newAsset : Types.TempFile = {
       owner;
-      authorizedReaders = [owner];
+      authorizedReaders; // TODO revisar si es necesario recibir los miembros autorizados
       id;
+      tempIdSource;
       chunks;
       chunks_qty = chunksQty;
+      chunk_size = config.chunkSize;
       total_length = size;
     };
 
@@ -111,37 +131,29 @@ shared ({ caller = BUCKET_MANAGER }) persistent actor class Bucket() = this {
     { id; chunksQty; chunkSize = config.chunkSize };
   };
 
-  public shared ({ caller }) func addChunk(id : Int, index : Nat, chunk : Blob) : async { #Ok: ?Int; #Err } {
+  public shared ({ caller }) func addChunk(id : Int, index : Nat, chunk : Blob) : async { #Ok: ?Int; #Err} {
     switch (Map.get<Types.FileId, Types.TempFile>(tempFiles, ihash, id)) {
       case null { #Err };
       case (?tmp) {
         assert (caller == tmp.owner);
-        tmp.chunks[index] := chunk;
-        print(debug_show(tmp.chunks));
 
+        // Verificar tamaño del chunk antes de guardarlo
+        if(chunk.size() != tmp.chunk_size) {
+          if(index < (tmp.chunks_qty - 1 : Nat) or chunk.size() != tmp.total_length % tmp.chunk_size) {
+            print("Chunk de tamaño incorrecto");
+            return #Err
+          }
+        };
+
+        tmp.chunks[index] := chunk;
         //// Si es el ultimo chunk de se activa la verificación e indexado en canister PM
         if (index == (tmp.chunks_qty - 1 : Nat)) {
-          // print("chequeando integridad del archivo");
           if (Types.checkFileIntegrity(tmp)) {
-            // print("integridad ok");
-            
-            let callback = switch(config.uploadDone) {
-              case ( ?callback ) { callback };
-              case null {
-                let PM:  actor {callback: shared ({internalId: Int})  -> async Int} = actor(Principal.toText(BUCKET_MANAGER));
-                config := {config with uploadDone = ?PM.callback};
-                print("Inicializando funcion callback");
-                PM.callback
-              };
-            };
-            
-            let fileId = await callback({internalId = id});
-
+            let fileId = await pm_canister.onFileLoaded({internalId = id; tempIdSource = tmp.tempIdSource}); // Notificacion para indexado en pm
             let newFile : Types.File = {
                 tmp with
                 chunks = Prim.Array_tabulate<Blob>(tmp.chunks_qty, func x = tmp.chunks[x])
             };
-            
             ignore Map.put<Types.FileId, Types.File>(files, ihash, id, newFile);
             ignore Map.remove<Types.FileId, Types.TempFile>(tempFiles, ihash, id);
             return #Ok(?fileId)
@@ -152,9 +164,36 @@ shared ({ caller = BUCKET_MANAGER }) persistent actor class Bucket() = this {
           };
         };
         #Ok(null)
-        
       };
     };
   };
+
+  func included<T>(arr: [T], e: T, eq: (T, T) -> Bool): Bool {
+    for (_e in arr.vals()){
+      if (eq(e, _e)) { return true }
+    };
+    false
+  };
+
+  public shared query ({ caller }) func getFileMetadata(fileId: Int): async ?Types.File {
+    Map.get<Int, Types.File>(files, ihash, fileId)
+  };
+
+  public shared query ({ caller }) func getChunk(fileId: Int, index: Nat): async {#Ok: {chunk: Blob; hasNext: Bool}; #Err: Text } {
+    switch (Map.get<Int, Types.File>(files, ihash, fileId)){
+      case null #Err("File not found");
+      case ( ?file ) {
+        if(file.chunks.size() < index ) { 
+          return #Err("Index out of bounds") 
+        };
+        if(not included<Principal>(file.authorizedReaders, caller, Principal.equal)) {
+          return #Err("Access denied")
+        };
+        #Ok({chunk = file.chunks[index]; hasNext = file.chunks.size() > index + 1 })
+      };
+    }
+  };
+
+
 
 };

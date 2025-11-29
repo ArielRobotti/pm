@@ -44,10 +44,12 @@ module {
     id : Int;
     authorizedReaders : [Principal];
     chunks_qty : Nat;
+    chunk_size: Nat;
     total_length : Nat;
   };
 
   public type TempFile = FileMetadata and {
+    tempIdSource: ?Int;
     chunks : [var Blob];
   };
 
@@ -73,7 +75,6 @@ module {
     maxSize: Nat;
     adminsBucket: [Principal];
     chunkSize: Nat;
-    uploadDone: ?(shared {internalId: Int} -> async Int)
   };
 
   public type BucketStatus = {
@@ -99,8 +100,14 @@ module {
 
   public func checkFileIntegrity(f : TempFile) : Bool {
     var byteCounter = 0;
-    for (chunk in f.chunks.vals()) {
-      byteCounter += chunk.size();
+    var i = 0;
+    while (i < f.chunks.size()) {
+      let size = f.chunks[i].size();
+      if(size != f.chunk_size and i < (f.chunks_qty - 1: Nat)) {
+        return false
+      };
+      byteCounter += size;
+      i += 1;
     };
     byteCounter == f.total_length;
   };

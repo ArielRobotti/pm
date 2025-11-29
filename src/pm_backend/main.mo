@@ -1,25 +1,31 @@
+
+import Types "types";
 import User "./modules/User";
 import Workspace "./modules/Workspace";
 import FileStorage "./modules/fileStorage/FileStorage";
 import Principal "mo:base/Principal";
 import Map "mo:map/Map";
+import { ihash } "mo:map/Map";
 import Set "mo:map/Set";
 import { now } "mo:base/Time";
 import { print } "mo:base/Debug";
+import Int "mo:base/Int";
 
 shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
 
   type UID = Workspace.UID;
 
   let users = User.init(SUPER_ADMIN);
-  let workspaces = Workspace.init();
+
+  let tempComments = Map.new<Int, Types.CommentArgs and {user: Principal}>();
+
+  let workspaces = Workspace.init({bucketAdmins = [SUPER_ADMIN, Principal.fromActor(this)]; pm = Principal.fromActor(this) });
 
   //// Admin functions test ///
 
   public shared ({ caller }) func testUploadFileRequest(size: Nat): async FileStorage.GetStorageResponse {
     assert(User.isUser(users, caller));
-    let adminsBucket = [SUPER_ADMIN, Principal.fromActor(this)];
-    await FileStorage.getStorageFor(workspaces.fileStorage, adminsBucket, size, caller, callback)
+    await FileStorage.getStorageFor(workspaces.fileStorage, size, caller, [], null)
   };
 
   public shared ({ caller }) func getFilestorageInfo(): async [(Int, FileStorage.StorageLocation)] {
@@ -36,11 +42,34 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
     await FileStorage.canisterStatus(canisterId)
   };
 
-  public shared ({caller})func callback({internalId: Int}): async Int {
-    print(debug_show(caller) # "llamando a PM");
+  public shared ({caller})func onFileLoaded({internalId: Int; tempIdSource: ?Int}): async Int {
+    print("Recibiendo notificacion de canister Bucket " # debug_show(caller));
     assert(FileStorage.isBucketCanister(workspaces.fileStorage, caller));
     let id = now();
     FileStorage.indexFile(workspaces.fileStorage, id, {canisterId = caller; internalId});
+    /// Si la fuente del file es un comentario ///
+    switch tempIdSource{
+      case null { };
+      case( ?(id) ) {
+        print("El archivo fue cargado desde un comentario");
+        // posiblemente se requiera  generalizar CommentArgs para incluir la carga de multimedia en un contexto de mensaje interno
+        switch (Map.get<Int, Types.CommentArgs and {user: Principal}>(tempComments, ihash, id)) {
+          case null { };
+          case ( ?data ){
+            print("Comentario temporal encontrado");
+            // se incrusta el datastorage del archivo en el cuerpo del mensaje antes de incluirlo en el BoxComment
+            let msgWithIncrustedDataStorage 
+              = Principal.toText(caller) // Este es el Bucket
+              # "/"
+              # Int.toText(internalId)
+              # "<<END-DATA-STORAGE>>"
+              # data.msg
+            ;
+            ignore Workspace.pushComment(workspaces, {data with msg = msgWithIncrustedDataStorage}, data.user)
+          }
+        }
+      }
+    };
     let remoteBucket: FileStorage.Bucket = actor(Principal.toText(caller));
     ignore remoteBucket.updateSettings({
       optAdmins = ?Set.toArray(users.admins);
@@ -139,11 +168,32 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
 
   //// CRUD Comments and reactions /////
 
-  public shared ({ caller }) func comment({entity: Workspace.Entity; msg: Text; path: [Int]}): async Workspace.PushResult{
-    Workspace.pushComment(workspaces, entity, path, msg, caller)
+  public shared ({ caller }) func comment(args: Types.CommentArgs): async Workspace.PushCommentResult{
+    //// Si el comentario incluye multimedia,
+    switch (args.assetSize) {
+      case null { };
+      case ( ?assetSize ) {
+        // 1. Se genera un tempId bajo el que guarda en un mapa, el comentario a la espera de la carga del archivo multimedia
+        let tempIdSource = now();
+        ignore Map.put<Int, Types.CommentArgs and {user: Principal}>(tempComments, ihash, tempIdSource, {args with user = caller});
+        // 2. Se pide almacenamiento en el Bucket Manager indicandole ademas el tempId
+        let members = Workspace.getMembersFrom(workspaces, args.entity);
+        let dataForStorage = await FileStorage.getStorageFor(workspaces.fileStorage, assetSize, caller, members, ?tempIdSource);
+        // 3. Se retorna al front la informacion para subir los chunks
+        return #RequireFileUpload(dataForStorage)
+        // Lo que pasa despues:
+        // 1. El front envia los chunks al Bucket y cuando este recibe el ultimo llama a la funcion callback de PM
+        // 2. El Bucket envia mediante esa funcion, el id interno asignado al nuevo archivo y el tempID asociado al comentario
+        // 3. El canister PM tomara ese comentario, incrustara la datastorage en el cuerpo del mensaje y completará pushComment
+        // Todo esta logica se implementa dentro de la funcion onFileLoaded
+      }
+    };
+    ////
+    Workspace.pushComment(workspaces, args, caller)
   };
 
   public shared ({ caller }) func deleteComment({entity: Workspace.Entity; path: [Int]}): async Workspace.DeleteResult {
+    // TODO Borrar archivo multimedia si se incluye
     Workspace.deleteComment(workspaces, entity, path, caller)
   };
 

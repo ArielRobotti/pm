@@ -2,6 +2,7 @@ import List "mo:base/List";
 import Array "mo:base/Array";
 import { now } "mo:base/Time";
 import Principal "mo:base/Principal";
+import FileStorage "fileStorage/FileStorage";
 
 module {
 
@@ -13,7 +14,12 @@ module {
     size: Nat
   };
 
-  public type PushResult = { #Ok : CommentBox; #Err : Text };
+  public type PushResult = { 
+    #Ok : CommentBox; 
+    #RequireFileUpload: FileStorage.GetStorageResponse; 
+    #Err : Text 
+  };
+
   public type DeleteResult = { #Ok : CommentBox; #Err : Text };
   public type EditResult = { #Ok : CommentBox; #Err : Text };
   public type ReactResult = { #Ok : CommentBox; #Err : Text };
@@ -22,7 +28,7 @@ module {
     created_at : Int;
     last_modification : ?Int;
     creator : Principal;
-    msg : Text;
+    msg : Text; // incluye referencias a archivos multimedia
     likes : [Principal];
     dislikes : [Principal];
     subComments : List.List<Comment>;
@@ -332,6 +338,9 @@ module {
               // commentsResult := List.push<Comment>(comment, commentsResult); 
               return #Err(msg); 
             };
+            case (#RequireFileUpload(_)) { 
+              // TODO revisar caso
+            }
           };
         } else {
           // No es el comentario objetivo

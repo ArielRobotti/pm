@@ -2,6 +2,7 @@ import { now } "mo:base/Time";
 import Array "mo:base/Array";
 import Principal "mo:base/Principal";
 import Map "mo:map/Map";
+import Set "mo:map/Set";
 import { ihash; phash } "mo:map/Map";
 import Buffer "mo:base/Buffer";
 import { print } "mo:base/Debug";
@@ -90,6 +91,8 @@ module {
     commentBox: Comments.CommentBox;
   };
 
+  public type Comment = Comments.Comment;
+
   public type Area = EntityMetadata and {
     creator : Principal;
     members : [Principal];
@@ -117,16 +120,22 @@ module {
     assignedUsers : [Principal];
   };
 
-  public func init() : State {
+  func callback(pm: Principal): FileStorage.CallbackUploadDone {
+    // Si cambia la firma de onFileLoadedCallback en PM reflejar ese cambio tambien acá (Posible error silencioso)
+    let PM: actor {onFileLoadedCallback: FileStorage.CallbackUploadDone } = actor(Principal.toText(pm));
+    PM.onFileLoadedCallback
+  };
+
+  public func init({bucketAdmins: [Principal]; pm: Principal}) : State {
     {
       userResources = Map.new<Principal, UserResources>();
       workspaces = Map.new<Int, Workspace>();
       projects = Map.new<Int, Project>();
-      fileStorage = FileStorage.init();
+      fileStorage = FileStorage.init({bucketAdmins});
     };
   };
 
-  public type PushResult = Comments.PushResult;
+  public type PushCommentResult = Comments.PushResult;
   public type DeleteResult = Comments.DeleteResult;
   public type ReactResult = Comments.ReactResult;
   public type EditResult = Comments.EditResult;
@@ -406,7 +415,7 @@ module {
         }
 
       };
-      case ( #Area(path) ){
+      case ( #Area(_path) ){
         //TODO
         #Ok([]);
       };
@@ -460,7 +469,44 @@ module {
     };
   };
 
-  // func addMember
+  func flattenAndDeduplicate<T>(m: [[T]], hashEqFn: (T -> Nat32, (T, T) -> Bool)): [T]{
+    let set = Set.new<T>();
+    for (array in m.vals()){
+      for (e in array.vals()) {
+        ignore Set.put<T>(set, hashEqFn, e);
+      }
+    };
+    Set.toArray(set)
+  };
+
+  public func getMembersFrom(s: State, e: Entity): [Principal]{
+    switch e {
+      case ( #Workspace(id) ) {
+        switch (Map.get<UID, Workspace>(s.workspaces, ihash, id)) {
+          case null { [] };
+          case ( ?ws ) {
+            flattenAndDeduplicate<Principal>([[ws.owner], ws.admins, ws.members], phash)
+          };
+        };
+      };
+      case ( #Project(id) ) { 
+        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
+          case null { [] };
+          case ( ?ws ) {
+            flattenAndDeduplicate<Principal>([[ws.projectOwner], ws.members], phash)
+          };
+        }; 
+      };
+      case ( #Area(_path) ) {
+        // TODO
+        []
+      };
+      case _ { [] };
+      
+    };
+    // []
+  };
+
 
   public func createArea(s : State, prid : UID, path : [UID], creator : Principal, name : Text, description : Text) : {
     #Ok : Area;
@@ -488,8 +534,10 @@ module {
     };
   };
 
-  public func pushComment(s: State, e: Entity, path: [Int], msg: Text, caller: Principal): PushResult{ 
-    switch e {
+  /////////////////////////// Comments and reactions section //////////////////////////////
+
+  public func pushComment(s: State, input: {entity: Entity; path: [Int]; msg: Text}, caller: Principal): PushCommentResult{ 
+    switch (input.entity) {
       case (#Project(id)) {
         switch (Map.get<UID, Project>(s.projects, ihash, id)){
           case null { return #Err("Project not found") };
@@ -497,13 +545,14 @@ module {
             if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner){
               return #Err("Access denied for the caller")
             };
-            let pushCommentResponse = Comments.push(project.commentBox, Comments.newComment(msg, caller), path);
+            let pushCommentResponse = Comments.push(project.commentBox, Comments.newComment(input.msg, caller), input.path);
             switch pushCommentResponse {
               case (#Ok(updateCommentBox)) {
                 ignore Map.put<UID, Project>(s.projects, ihash, id, {project with commentBox = updateCommentBox });
                 #Ok(updateCommentBox)
               };
-              case (#Err(e)){ return #Err(e) }
+              case (#Err(e)){ return #Err(e) };
+              case _ { #Err("Unexpected error")}
             }
           }
         }

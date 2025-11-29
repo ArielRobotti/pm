@@ -41,11 +41,12 @@ module {
   };
 
 
-   public type GetStorageResponse = {
+  public type GetStorageResponse = {
     bucketMetadata: BucketMetadata;
     uploadParameters: Types.UploadResponse;
   };
   
+  public type CallbackUploadDone = Types.CallbackUploadDone; 
 
   // ===============================================
   // 4. Tipo de Estado (State Type)
@@ -53,7 +54,8 @@ module {
 
   public type FileStorage = {
     index : Map.Map<Int, StorageLocation>;
-    buckets : Map.Map<Principal, BucketMetadata>
+    buckets : Map.Map<Principal, BucketMetadata>;
+    bucketAdmins: [Principal];
   };
 
   // ===============================================
@@ -91,15 +93,14 @@ module {
     await IC.ic.canister_status({canister_id})
   };
 
-  func newBucket(uploadDone: Types.CallbackUploadDone, adminsBucket: [Principal]) : async BucketMetadata {
-    // Prim.cyclesAdd<system>(2_000_000_000_000); // TODO cambiar a Nueva sintaxis
+  func newBucket(s: FileStorage) : async BucketMetadata {
 
     let newBucket = await (with cycles = 2_000_000_000_000) Bucket.Bucket();
-    let initResponse = await newBucket.init(uploadDone, adminsBucket);
+    let initResponse = await newBucket.init(s.bucketAdmins);
     print("New bucket initialized --> " # debug_show (initResponse));
     let canisterId = Principal.fromActor(newBucket);
     print("Adding controllers to the new canister ... ");
-    ignore addControllers(canisterId, adminsBucket);
+    ignore addControllers(canisterId, s.bucketAdmins);
     { canisterId ; remoteActor = newBucket };
   };
 
@@ -107,14 +108,15 @@ module {
   // 5. Funciones Publicas
   // ===============================================
   
-  public func init(): FileStorage {
+  public func init({bucketAdmins: [Principal]}): FileStorage {
    { 
     index = Map.new<FileId, StorageLocation>();
     buckets =  Map.new<Principal, BucketMetadata>();
+    bucketAdmins ;
    }
   };
 
-  public func getStorageFor(s : FileStorage, adminsBucket: [Principal], size : Nat, caller : Principal, callback: Types.CallbackUploadDone) : async GetStorageResponse {
+  public func getStorageFor(s : FileStorage, size : Nat, caller : Principal, readers: [Principal], tempIdSource: ?Int) : async GetStorageResponse {
     print("solicitando almacenamiento");
     var bestCandidate : ?{ bucket : BucketMetadata; size : Nat } = null;
     for (metadata in Map.vals(s.buckets)) {
@@ -137,12 +139,12 @@ module {
     };
 
     let storage = switch bestCandidate {
-      case null { await newBucket(callback, adminsBucket) };
+      case null { await newBucket(s) };
       case (?best) { best.bucket };
     };
     ignore Map.put<Principal, BucketMetadata>(s.buckets, phash, storage.canisterId, storage);
 
-    let uploadParameters = await storage.remoteActor.uploadRequest(caller, size);
+    let uploadParameters = await storage.remoteActor.uploadRequest(caller, readers, size, tempIdSource);
     {bucketMetadata  = storage; uploadParameters };
 
   };
