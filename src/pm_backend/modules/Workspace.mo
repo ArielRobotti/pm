@@ -6,51 +6,29 @@ import Set "mo:map/Set";
 import { ihash; phash } "mo:map/Map";
 import Buffer "mo:base/Buffer";
 import { print } "mo:base/Debug";
-import FileStorage "./fileStorage/FileStorage";
-import Comments "./Comments";
+import FileStorage "./fileStorage";
+import Comments "./comments";
+import Types "../types";
+import Notifications "./notifications";
 
 module {
 
   //////////////////// Types ////////////////////
 
-  public type UID = Int; //Date of creation
-
-  public type UserResources = {
-    workspaces : [UID];
-    projects : [UID];
-  };
-
-  public type State = {
-    userResources : Map.Map<Principal, UserResources>;
-    workspaces : Map.Map<Int, Workspace>;
-    projects : Map.Map<Int, Project>;
-    fileStorage: FileStorage.FileStorage;
-  };
-
-  public type Entity = {
-    #Workspace : UID;
-    #Project : UID;
-    #Area : [UID];
-  };
-  public type EntityEditableData = {
-    name : Text;
-    description : Text;
-    details : Text;
-    coverImage : ?Blob;
-    logo : ?Blob;
-  };
-
-  public type OptEntityEditableData = {
-    name : ?Text;
-    description : ?Text;
-    details : ?Text;
-    coverImage : ?Blob;
-    logo : ?Blob;
-  };
-
-  public type EntityMetadata = EntityEditableData and {
-    id : UID;
-  };
+  public type UID = Types.UID;
+  public type UserResources = Types.UserResources;
+  public type State = Types.State;
+  public type Entity = Types.Entity;
+  public type EntityEditableData = Types.EntityEditableData;
+  public type OptEntityEditableData = Types.OptEntityEditableData;
+  public type EntityMetadata = Types.EntityMetadata;
+  public type Workspace = Types.Workspace;
+  public type Project = Types.Project;
+  public type Comment = Types.Comment;
+  public type Area = Types.Area;
+  public type ChangeRecord = Types.ChangeRecord;
+  public type TastStatus = Types.TastStatus;
+  public type Task = Types.Task;
 
   // public let anonimous = Principal.fromBlob("\04");
   // let blob: Blob = "\04";
@@ -74,52 +52,6 @@ module {
     client = null;
   };
 
-  public type Workspace = EntityMetadata and {
-    owner : Principal;
-    admins : [Principal];
-    members : [Principal];
-    projectIds : [UID];
-  };
-
-  public type Project = EntityMetadata and {
-    id : UID;
-    client : ?UID;
-    projectOwner : Principal;
-    members : [Principal];
-    workspace : UID; // vinculo bidireccional necesario?
-    areas : [Area];
-    commentBox: Comments.CommentBox;
-  };
-
-  public type Comment = Comments.Comment;
-
-  public type Area = EntityMetadata and {
-    creator : Principal;
-    members : [Principal];
-    tasks : [UID];
-    subareas : [Area];
-  };
-
-  public type ChangeRecord = {
-    date : Int;
-    user : Principal;
-  };
-
-  public type TastStatus = {
-    #Todo : ChangeRecord;
-    #InProgress : ChangeRecord;
-    #Review : ChangeRecord;
-    #Done : ChangeRecord;
-    #Custom : { customStatus : Text; change : ChangeRecord };
-  };
-
-  public type Task = EntityMetadata and {
-    tags : [Text];
-    status : TastStatus;
-    deadline : Int;
-    assignedUsers : [Principal];
-  };
-
   func callback(pm: Principal): FileStorage.CallbackUploadDone {
     // Si cambia la firma de onFileLoadedCallback en PM reflejar ese cambio tambien acá (Posible error silencioso)
     let PM: actor {onFileLoadedCallback: FileStorage.CallbackUploadDone } = actor(Principal.toText(pm));
@@ -129,6 +61,7 @@ module {
   public func init({bucketAdmins: [Principal]; pm: Principal}) : State {
     {
       userResources = Map.new<Principal, UserResources>();
+      userNotifications = Notifications.init();
       workspaces = Map.new<Int, Workspace>();
       projects = Map.new<Int, Project>();
       fileStorage = FileStorage.init({bucketAdmins});
@@ -262,10 +195,6 @@ module {
   /////////////////////////////////// Geters ////////////////////////////////////
 
   public func getUserWorkspaces(state : State, caller : Principal) : [UID] {
-    // switch (Map.get<Principal, [UID]>(state.userWorkspaces, phash, caller)) {
-    //   case null { [] };
-    //   case (?uids) { uids };
-    // };
     switch (Map.get<Principal, UserResources>(state.userResources, phash, caller)){
       case null [];
       case (?resources) {resources.workspaces}
@@ -534,114 +463,20 @@ module {
     };
   };
 
-  /////////////////////////// Comments and reactions section //////////////////////////////
-
-  public func pushComment(s: State, input: {entity: Entity; path: [Int]; msg: Text}, caller: Principal): PushCommentResult{ 
-    switch (input.entity) {
-      case (#Project(id)) {
-        switch (Map.get<UID, Project>(s.projects, ihash, id)){
-          case null { return #Err("Project not found") };
-          case ( ?project ) {
-            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner){
-              return #Err("Access denied for the caller")
-            };
-            let pushCommentResponse = Comments.push(project.commentBox, Comments.newComment(input.msg, caller), input.path);
-            switch pushCommentResponse {
-              case (#Ok(updateCommentBox)) {
-                ignore Map.put<UID, Project>(s.projects, ihash, id, {project with commentBox = updateCommentBox });
-                #Ok(updateCommentBox)
-              };
-              case (#Err(e)){ return #Err(e) };
-              case _ { #Err("Unexpected error")}
-            }
-          }
-        }
-      };
-      case _ { #Err("not implemented yet")}
-    }
+  public func pushComment(s: State, input: {entity: Entity; path: [Int]; msg: Text}, caller: Principal): PushCommentResult { 
+    Comments.pushComment(s, input, caller)
   };
 
   public func deleteComment(s: State, e: Entity, path: [Int], caller: Principal): DeleteResult {
-    switch e {
-      case (#Project(id)) {
-        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
-          case null { return #Err("Project not found") };
-          case (?project) {
-            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner) {
-              return #Err("Access denied for the caller")
-            };
-            let deleteCommentResponse = Comments.delete(project.commentBox, path, caller);
-            switch (deleteCommentResponse) {
-              case (#Ok(updateCommentBox)) {
-                ignore Map.put<UID, Project>(s.projects, ihash, id, { project with commentBox = updateCommentBox });
-                return #Ok(updateCommentBox)
-              };
-              case (#Err(e)) { return #Err(e) }
-            };
-          };
-        };
-      };
-      case (#Area(path)) {
-        assert(path.size() >= 2);
-        switch(Map.get<UID, Project>(s.projects, ihash, path[0])) {
-          case null { return #Err("Project not found")};
-          case ( ?project ) {
-            return #Err("project Ok. Function not implemented yet")
-          }
-        };
-      };
-      case _ { #Err("not implemented yet") }
-    }
+    Comments.deleteComment(s, e, path, caller)
   };
 
   public func editComment(s: State, e: Entity, path: [Int], newMsg: Text, caller: Principal): EditResult {
-    switch e {
-      case (#Project(id)) {
-        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
-          case null { return #Err("Project not found") };
-          case (?project) {
-            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner) {
-              return #Err("Access denied for the caller")
-            };
-            let editCommentResponse = Comments.edit(project.commentBox, path, newMsg, caller);
-            switch (editCommentResponse) {
-              case (#Ok(updateCommentBox)) {
-                ignore Map.put<UID, Project>(s.projects, ihash, id, { project with commentBox = updateCommentBox });
-                #Ok(updateCommentBox)
-              };
-              case (#Err(e)) { return #Err(e) }
-            };
-          };
-        };
-      };
-      case _ { #Err("not implemented yet") }
-    }
+    Comments.editComment(s, e, path, newMsg, caller)
   };
 
   public func reactToComment(s: State, e: Entity, path: [Int], reaction: ?Bool, caller: Principal): ReactResult {
-    switch e {
-      case (#Project(id)) {
-        switch (Map.get<UID, Project>(s.projects, ihash, id)) {
-          case null { return #Err("Project not found") };
-          case (?project) {
-            if (not inArray<Principal>(project.members, caller, Principal.equal) and caller != project.projectOwner) {
-              return #Err("Access denied for the caller")
-            };
-            let reactCommentResponse = Comments.react(project.commentBox, path, reaction, caller);
-            switch (reactCommentResponse) {
-              case (#Ok(updateCommentBox)) {
-                ignore Map.put<UID, Project>(s.projects, ihash, id, { project with commentBox = updateCommentBox });
-                #Ok(updateCommentBox)
-              };
-              case (#Err(e)) { return #Err(e) }
-            };
-          };
-        };
-      };
-      case _ { #Err("not implemented yet") }
-    }
+    Comments.reactToComment(s, e, path, reaction, caller)
   };
-
    
-
 };

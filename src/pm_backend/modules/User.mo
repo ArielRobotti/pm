@@ -3,29 +3,20 @@ import Set "mo:map/Set";
 import { phash } "mo:map/Map";
 import Principal "mo:base/Principal";
 import { now } "mo:base/Time";
+import SharedTypes "./shared_types";
 
 module {
 
-  public type Metadata = [MeatadataPart];
+  public type Metadata = [MetadataPart];
 
-  public type MeatadataPart = {
-    key : Text;
-    value : Value;
-  };
+  public type MetadataPart = SharedTypes.MetadataPart;
 
-  public type Value = {
-    #Nat : Nat;
-    #Int : Int;
-    #Blob : Blob;
-    #Text : Text;
-    #Array : [Value];
-    #Map : [(Text, Value)];
-  };
+  public type Value = SharedTypes.Value;
 
   public type Verification = {
     #Email;
     #Phone;
-    #Custom : MeatadataPart;
+    #Custom : MetadataPart;
   };
 
   public type EditableData = {

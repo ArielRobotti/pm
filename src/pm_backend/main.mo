@@ -2,7 +2,7 @@
 import Types "types";
 import User "./modules/User";
 import Workspace "./modules/Workspace";
-import FileStorage "./modules/fileStorage/FileStorage";
+import FileStorage "./modules/fileStorage";
 import Principal "mo:base/Principal";
 import Map "mo:map/Map";
 import { ihash } "mo:map/Map";
@@ -37,7 +37,7 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
     Map.toArray<Principal, FileStorage.BucketMetadata>(workspaces.fileStorage.buckets)
   };
 
-  public shared ({ caller }) func getBucketCanisterStatus(canisterId: Principal): async FileStorage.CanisterStatusResult {
+  public shared ({ caller }) func backet_canister_status(canisterId: Principal): async FileStorage.CanisterStatusResult {
 
     await FileStorage.canisterStatus(canisterId)
   };
@@ -155,10 +155,10 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
     Workspace.addMember(workspaces, #Project(prid), caller, newMember)
   };
 
+
   public shared ({ caller }) func archiveProject(): async (){
     
   };
-
 
   ///// Areas /////
 
@@ -169,21 +169,21 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
   //// CRUD Comments and reactions /////
 
   public shared ({ caller }) func comment(args: Types.CommentArgs): async Workspace.PushCommentResult{
-    //// Si el comentario incluye multimedia,
     switch (args.assetSize) {
       case null { };
       case ( ?assetSize ) {
-        // 1. Se genera un tempId bajo el que guarda en un mapa, el comentario a la espera de la carga del archivo multimedia
+        // Si el comentario incluye multimedia,
+        // 1. Se genera un id temporal bajo el que guarda en un mapa, el comentario a la espera de la carga del archivo multimedia
         let tempIdSource = now();
         ignore Map.put<Int, Types.CommentArgs and {user: Principal}>(tempComments, ihash, tempIdSource, {args with user = caller});
-        // 2. Se pide almacenamiento en el Bucket Manager indicandole ademas el tempId
+        // 2. Se pide almacenamiento en el Bucket Manager indicandole ademas el id temporal
         let members = Workspace.getMembersFrom(workspaces, args.entity);
         let dataForStorage = await FileStorage.getStorageFor(workspaces.fileStorage, assetSize, caller, members, ?tempIdSource);
         // 3. Se retorna al front la informacion para subir los chunks
         return #RequireFileUpload(dataForStorage)
         // Lo que pasa despues:
         // 1. El front envia los chunks al Bucket y cuando este recibe el ultimo llama a la funcion callback de PM
-        // 2. El Bucket envia mediante esa funcion, el id interno asignado al nuevo archivo y el tempID asociado al comentario
+        // 2. El Bucket envia mediante esa funcion, el id interno asignado al nuevo archivo y el id temporal asociado al comentario
         // 3. El canister PM tomara ese comentario, incrustara la datastorage en el cuerpo del mensaje y completará pushComment
         // Todo esta logica se implementa dentro de la funcion onFileLoaded
       }

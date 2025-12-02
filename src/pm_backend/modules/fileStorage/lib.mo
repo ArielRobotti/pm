@@ -11,9 +11,9 @@ import { print } "mo:base/Debug";
 
 module {
 
-  // ===============================================
+  // -----------------------------------------------
   // 1. Tipos de Utilidad / Base (Base Types)
-  // ===============================================
+  // -----------------------------------------------
 
   public type FileId = Int;
 
@@ -31,9 +31,9 @@ module {
     chunks : [Blob];
   };
 
-  // ===============================================
+  // -----------------------------------------------
   // 2. Tipos de Entidad Principal (Main Entity Types)
-  // ===============================================
+  // -----------------------------------------------
 
   public type BucketMetadata = {
     remoteActor : Bucket.Bucket;
@@ -48,9 +48,9 @@ module {
   
   public type CallbackUploadDone = Types.CallbackUploadDone; 
 
-  // ===============================================
+  // -----------------------------------------------
   // 4. Tipo de Estado (State Type)
-  // ===============================================
+  // -----------------------------------------------
 
   public type FileStorage = {
     index : Map.Map<Int, StorageLocation>;
@@ -58,9 +58,9 @@ module {
     bucketAdmins: [Principal];
   };
 
-  // ===============================================
+  // -----------------------------------------------
   // 5. Funciones Privadas
-  // ===============================================
+  // -----------------------------------------------
 
   func addControllers(canister_id: Principal, _controllers: [Principal]): async () {
     let ic = IC.ic;
@@ -104,9 +104,9 @@ module {
     { canisterId ; remoteActor = newBucket };
   };
 
-  // ===============================================
+  // -----------------------------------------------
   // 5. Funciones Publicas
-  // ===============================================
+  // -----------------------------------------------
   
   public func init({bucketAdmins: [Principal]}): FileStorage {
    { 
