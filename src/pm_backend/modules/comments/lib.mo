@@ -9,6 +9,9 @@ import WorkspaceTypes "../../types";
 import Map "mo:map/Map";
 import { ihash } "mo:map/Map";
 import Principal "mo:base/Principal";
+import { now } "mo:base/Time";
+import Array "mo:base/Array";
+import Notifications "../notifications"
 
 module {
     // Types
@@ -48,6 +51,18 @@ module {
                   return #Err("Access denied for the caller")
                 };
                 let pushCommentResponse = push(project.commentBox, newComment(input.msg, caller), input.path);
+                let notification: Notifications.Notification = {
+                  date = now();
+                  kind = #NewComment({autor = caller; msg = input.msg});
+                  read = false;
+                  resume  = input.msg;
+                };
+                Notifications.batchNotification(
+                  s.userNotifications, 
+                  notification, 
+                  Array.filter<Principal>(project.members, func member = member != caller)
+                );
+                
                 switch pushCommentResponse {
                   case (#Ok(updateCommentBox)) {
                     ignore Map.put<WorkspaceTypes.UID, WorkspaceTypes.Project>(s.projects, ihash, id, {project with commentBox = updateCommentBox });

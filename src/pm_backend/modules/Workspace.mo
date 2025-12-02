@@ -285,6 +285,7 @@ module {
               #Err("ActionDenied");
             } else {
               let members = addIfNotInclude<Principal>(ws.members, newMember, Principal.equal);
+              // Push notification to newMember
               ignore Map.put<Int, Workspace>(
                 s.workspaces,
                 ihash,

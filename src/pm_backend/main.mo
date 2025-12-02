@@ -7,9 +7,11 @@ import Principal "mo:base/Principal";
 import Map "mo:map/Map";
 import { ihash } "mo:map/Map";
 import Set "mo:map/Set";
+import List "mo:base/List";
 import { now } "mo:base/Time";
 import { print } "mo:base/Debug";
 import Int "mo:base/Int";
+import Notifications "./modules/notifications";
 
 shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
 
@@ -87,6 +89,22 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
   public shared query ({ caller }) func login() : async User.LoginResponse {
     assert (not Principal.isAnonymous(caller));
     User.login(users, caller);
+  };
+
+  public shared query ({ caller }) func getMyNotifications(): async [Notifications.Notification]{
+    List.toArray<Notifications.Notification>(
+      Notifications.getNotificationsFor(
+        workspaces.userNotifications, caller
+      )
+    )
+  };
+
+  public shared ({ caller }) func readNotification(id: Int): async {#Err : Text; #Ok}{
+    Notifications.markAsRead(workspaces.userNotifications, caller ,id)
+  };
+
+  public shared ({ caller }) func deleteNotification(id: Int): async {#Err : Text; #Ok}{
+    Notifications.deleteNotification(workspaces.userNotifications, caller ,id)
   };
 
   //// Workspaces ///
