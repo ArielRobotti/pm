@@ -131,7 +131,7 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
     Workspace.editEntity(workspaces, caller, #Area(path), data)
   };
 
-  public shared query ({ caller }) func getMyWorkspaces(): async [UID]{
+  public shared query ({ caller }) func getMyWorkspaces(): async [Types.EntityCard]{
     Workspace.getUserWorkspaces(workspaces, caller)
   };
 
@@ -153,6 +153,10 @@ shared ({caller = SUPER_ADMIN}) persistent actor class() = this {
       return #Err
     };
     Workspace.createProject(workspaces, wsid, caller, name, description)
+  };
+
+  public shared ({ caller }) func getProjectCardsFrom(wsid: UID): async [Types.EntityCard]{
+    Workspace.getProjectsCardFrom(workspaces, caller, wsid)
   };
   
   public shared query ({ caller }) func getProject(id: UID): async {#Ok: Workspace.Project; #Err: Text}{

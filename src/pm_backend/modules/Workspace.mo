@@ -5,6 +5,7 @@ import Map "mo:map/Map";
 import Set "mo:map/Set";
 import { ihash; phash } "mo:map/Map";
 import Buffer "mo:base/Buffer";
+import List "mo:base/List";
 import { print } "mo:base/Debug";
 import FileStorage "./fileStorage";
 import Comments "./comments";
@@ -194,10 +195,22 @@ module {
 
   /////////////////////////////////// Geters ////////////////////////////////////
 
-  public func getUserWorkspaces(state : State, caller : Principal) : [UID] {
+  public func getUserWorkspaces(state : State, caller : Principal) : [Types.EntityCard] {
     switch (Map.get<Principal, UserResources>(state.userResources, phash, caller)){
       case null [];
-      case (?resources) {resources.workspaces}
+      case (?resources) {
+        var result = List.nil<Types.EntityCard>();
+        for (id in resources.workspaces.vals()){
+          switch (Map.get<UID, Workspace>(state.workspaces, ihash, id)){
+            case ( ?ws ) {
+              result := List.push<Types.EntityCard>(ws, result)
+            };
+            case null {}
+          }
+        };
+        List.toArray(result)
+        
+      }
     }
   };
 
@@ -379,6 +392,24 @@ module {
         let updateProjectIds = addIfNotInclude<Int>(ws.projectIds, id, func(a : UID, b : UID) = a == b);
         ignore Map.put<UID, Workspace>(s.workspaces, ihash, wsid, { ws with projectIds = updateProjectIds });
         #Ok(newProject);
+      };
+    };
+  };
+
+  public func getProjectsCardFrom(s: State, caller: Principal, wsid: UID ): [Types.EntityCard] {
+    switch (getWorkspace(s, wsid, caller)) {
+      case (#Err(_)) { [] };
+      case (#Ok(ws)) {
+        var result = List.nil<Types.EntityCard>();
+        for(id in ws.projectIds.vals()){
+          switch(Map.get<UID, Project>(s.projects, ihash, id)){
+            case ( ?p ) { 
+              result := List.push<Types.EntityCard>(p, result)
+             };
+            case null { }
+          }
+        };
+        List.toArray(result);
       };
     };
   };

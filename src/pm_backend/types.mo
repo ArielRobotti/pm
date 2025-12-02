@@ -46,6 +46,15 @@ module {
     id : UID;
   };
 
+  public type EntityCard = {
+    id: Int;
+    name : Text;
+    description : Text;
+    // kind: Text;
+    members : [Principal];
+    coverImage : ?Blob;
+  };
+
   public type Workspace = EntityMetadata and {
     owner : Principal;
     admins : [Principal];
@@ -58,7 +67,7 @@ module {
     client : ?UID;
     projectOwner : Principal;
     members : [Principal];
-    workspace : UID; // vinculo bidireccional necesario?
+    workspace : UID; 
     areas : [Area];
     commentBox: CommentsTypes.CommentBox;
   };
